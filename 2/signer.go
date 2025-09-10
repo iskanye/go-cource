@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,30 +14,39 @@ func ExecutePipeline(jobs ...job) {
 
 	for _, job := range jobs {
 		out := make(chan interface{})
+		jobFunc := JobFunc(job, &wg)
+
 		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			job(in, out)
-			close(out)
-		}()
-
+		go jobFunc(in, out)
 		in = out
 	}
 
 	wg.Wait()
 }
 
+func JobFunc(jobFunc job, wg *sync.WaitGroup) job {
+	return func(in, out chan interface{}) {
+		defer wg.Done()
+		jobFunc(in, out)
+		close(out)
+	}
+}
+
 func SingleHash(in, out chan interface{}) {
 	var wg sync.WaitGroup
 
 	for i := range in {
-		data := i.(string)
+		data := fmt.Sprint(i)
+		md5 := DataSignerMd5(data)
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
-			out <- (<-Crc32Channel(data)) + "~" + (<-Crc32Channel(DataSignerMd5(data)))
+
+			ch1 := Crc32Channel(data)
+			ch2 := Crc32Channel(md5)
+
+			out <- (<-ch1) + "~" + (<-ch2)
 		}()
 	}
 
@@ -47,7 +57,7 @@ func MultiHash(in, out chan interface{}) {
 	var wg sync.WaitGroup
 
 	for i := range in {
-		data := i.(string)
+		data := fmt.Sprint(i)
 		wg.Add(1)
 
 		go func() {
@@ -76,7 +86,7 @@ func CombineResults(in, out chan interface{}) {
 	result := make([]string, 0)
 
 	for i := range in {
-		result = append(result, i.(string))
+		result = append(result, fmt.Sprint(i))
 	}
 
 	sort.Strings(result)
